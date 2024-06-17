@@ -1,3 +1,33 @@
+# New solvers for Euclidean homography estimation
+The new solvers are available at [link](https://github.com/yaqding/graph-cut-ransac/tree/SIFT). 
+
+## Install in Conda environment
+```bash
+git clone -b SIFT --single-branch https://github.com/yaqding/graph-cut-ransac.git
+conda create -n homo_sift python=3.9 anaconda
+conda activate homo_sift
+cd graph-cut-ransac
+python -m pip install .
+cd ..
+```
+
+## Test
+```bash
+python test_gcransac_EH.py --path 'path-to-data' --split 'test' --solver 'One' --scene 'scene-name'
+```
+
+## Acknowledgements
+```
+@inproceedings{ding2024noisy,
+  title={Noisy One-point Homographies are Surprisingly Good},
+  author={Ding, Yaqing and Astermark, Jonathan and Oskarsson, Magnus and Larsson, Viktor},
+  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+  pages={5125--5134},
+  year={2024}
+}
+
+```
+
 # Dataset
 
 The dataset is available at [link](https://polybox.ethz.ch/index.php/s/R5sPelZ8688It92).
