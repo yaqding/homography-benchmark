@@ -11,6 +11,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 from errors import reprojection_error, homography_pose_error, calc_mAA, calc_mAA_pose, homography_pose_error, reprojection_error
 import pygcransac
+from numpy.linalg import inv
 
 def get_LAF(kps, sc, ori):
     '''
@@ -22,7 +23,7 @@ def get_LAF(kps, sc, ori):
     for i, kp in enumerate(kps):
         s = 12.0 * sc[i]
         a = ori[i]
-        cos = math.cos(a)
+        cos = math.cos(a) 
         sin = math.sin(a)
         out[i, 0, 0] = s * cos
         out[i, 0, 1] = -s * sin
@@ -87,6 +88,26 @@ def run_gcransac(pair, scene_scale, matches, relative_pose, image_size1, image_s
 
         # Constructing the correspondences
         correspondences = np.concatenate((matches[snn_mask, :4], affines), axis=1)
+    # Run One SIFT-based solver
+    elif args.solver == 3 or args.solver == 4:
+        # 1-SIFT and 2-ScaOri
+        pt0 = (matches[:,0] - K1 [0,2])/K1 [0,0]
+        pt1 = (matches[:,1] - K1 [1,2])/K1 [0,0]
+        pt2 = (matches[:,2] - K2 [0,2])/K2 [0,0]
+        pt3 = (matches[:,3] - K2 [1,2])/K2 [0,0]
+        # The point correspondences
+        points = np.c_[pt0, pt1, pt2, pt3]
+        points = points[snn_mask,:4]
+        # SIFT angles in the source image
+        angle1 = matches[snn_mask, 4] / 180.0 * np.pi
+        # SIFT angles in the destinstion image
+        angle2 = matches[snn_mask, 5] / 180.0 * np.pi
+        # SIFT scale in the source image
+        scale1 = matches[snn_mask, 6] / K1 [0,0]
+        # SIFT scale in the destination image
+        scale2 = matches[snn_mask, 7] / K2 [0,0]
+        # The point correspondences
+        correspondences = np.concatenate((points, np.expand_dims(scale1, axis=1), np.expand_dims(scale2, axis=1), np.expand_dims(angle1, axis=1), np.expand_dims(angle2, axis=1)), axis=1)
     # Inlier probabilities
     probabilities = []
 
@@ -106,7 +127,12 @@ def run_gcransac(pair, scene_scale, matches, relative_pose, image_size1, image_s
             point_number = correspondences.shape[0]
             for i in range(point_number):
                 probabilities.append(1.0 - i / point_number)
-
+                
+    if args.solver == 3 or args.solver == 4:
+        threshold_normalized = args.inlier_threshold / K2[0,0]
+    else:
+        threshold_normalized = args.inlier_threshold
+        
     # Run the homography estimation implemented in OpenCV
     tic = time.perf_counter()
     H_est, inliers = pygcransac.findHomography(
@@ -122,11 +148,14 @@ def run_gcransac(pair, scene_scale, matches, relative_pose, image_size1, image_s
         sampler = args.sampler,
         min_iters = args.minimum_iterations,
         max_iters = args.maximum_iterations,
+        neighborhood = 1,
         solver = args.solver,
-        threshold = args.inlier_threshold)
+        threshold = threshold_normalized)
     toc = time.perf_counter()
     runtime = toc - tic
 
+    if args.solver == 3 or args.solver == 4:
+        H_est = K2@H_est@inv(K1)
     # Count the inliers
     inlier_number = inliers.sum()
 
@@ -198,6 +227,10 @@ def solver_flag(name):
         return 1
     if name == "affine":
         return 2
+    if name == "TwoScaOri":
+        return 3
+    if name == "One":
+        return 4
     return 0
 
 if __name__ == "__main__":
@@ -215,8 +248,8 @@ if __name__ == "__main__":
     parser.add_argument("--sampler", type=str, help="Choose from: Uniform, PROSAC, PNAPSAC, Importance, ARSampler.", choices=["Uniform", "PROSAC", "PNAPSAC", "Importance", "ARSampler"], default="PROSAC")
     parser.add_argument("--spatial_coherence_weight", type=float, default=0.1)
     parser.add_argument("--neighborhood_size", type=float, default=20)
-    parser.add_argument("--solver", type=str, help="Choose from: point, sift, affine.", choices=["point", "sift", "affine"], default="point")
-    parser.add_argument("--core_number", type=int, default=4)
+    parser.add_argument("--solver", type=str, help="Choose from: point, sift, affine.", choices=["point", "sift", "affine", "TwoScaOri", "One"], default="point")
+    parser.add_argument("--core_number", type=int, default=8)
     parser.add_argument("--path_to_deep_prefiltered_dir", type=str, default='',  help='If path is provided, the deep prefiltered match confidence is used instead of snn_ratio')
     parser.add_argument("--deep_confidence_th", type=float, default=0.5,  help='Deep filtering threshold. Bigger is stricter. Works only if --path_to_deep_prefiltered_dir is presented')
     
@@ -264,7 +297,7 @@ if __name__ == "__main__":
         print(f"{len(pairs)} image pairs are loaded.")
         
         # Run homography estimation on the entire scene
-        times, errors, rotation_errors, translation_errors, inlier_numbers, absolute_translation_errors = estimate_homographies(pairs, data, scale, deep_confidence_h5,args)
+        times, errors, rotation_errors, translation_errors, inlier_numbers, absolute_translation_errors = estimate_homographies(pairs, data, scale, deep_confidence_h5,,args)
         
         # Calculating the pose error as the maximum of the rotation and translation errors
         maximum_pose_errors = {}
